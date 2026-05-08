@@ -162,12 +162,7 @@ setup_nopasswd() {
 setup_auto_update() {
     log "配置自动更新 (sing-box / 系统补丁 / deploy.sh)..."
 
-    # 1) 把当前脚本固定到 /usr/local/bin/deploy.sh
-    install -m 755 "$0" /usr/local/bin/deploy.sh 2>/dev/null \
-        || cp "$(realpath "$0")" /usr/local/bin/deploy.sh && chmod +x /usr/local/bin/deploy.sh
-
-    # 2) cron: 每周升级 sing-box, 每日自更新 deploy.sh
-    # 错峰: 用主 IP 的 sha256 算 (周几 + 几点 + 几分), 避免 4+ 台机器同时拉 GitHub / 同时升级
+    # 错峰参数: 用主 IP 的 sha256 算 (周几 + 几点 + 几分), 避免多台机器同时拉 GitHub / 同时升级
     # 注意: bash 数字带前导 0 默认按八进制解析, 用 10# 强制十进制
     local IP_HASH=$(hostname -I | awk '{print $1}' | sha256sum | tr -dc '0-9')
     local UPDATE_DOW=$(( 10#${IP_HASH:0:4} % 7 ))         # 0=周日
@@ -177,17 +172,40 @@ setup_auto_update() {
     local DAILY_MIN=$(( 10#${IP_HASH:16:4} % 60 ))
     local DOW_NAME=(周日 周一 周二 周三 周四 周五 周六)
 
+    # 检测当前脚本是不是在 git 仓库里
+    # - 是 → cron 用 git pull 更新, 保留你 git clone 的工作目录
+    # - 否 → cron 用 curl 拉单文件到 /usr/local/bin/, 适合"一行 curl|bash"场��
+    local SCRIPT_PATH=$(realpath "$0")
+    local SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
+    local DAILY_CMD UPDATE_CMD MODE_DESC
+
+    if cd "$SCRIPT_DIR" 2>/dev/null && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        local REPO_DIR=$(git rev-parse --show-toplevel)
+        local SCRIPT_REL=$(realpath --relative-to="$REPO_DIR" "$SCRIPT_PATH")
+        MODE_DESC="git 模式 ($REPO_DIR)"
+        DAILY_CMD="cd $REPO_DIR && git pull --quiet --ff-only 2>/dev/null && bash -n $SCRIPT_REL 2>/dev/null || true"
+        UPDATE_CMD="cd $REPO_DIR && bash $SCRIPT_REL update >> /var/log/singbox-update.log 2>&1"
+    else
+        MODE_DESC="单文件模式 (/usr/local/bin/deploy.sh)"
+        # 把当前脚本固定到 /usr/local/bin/
+        install -m 755 "$SCRIPT_PATH" /usr/local/bin/deploy.sh 2>/dev/null \
+            || { cp "$SCRIPT_PATH" /usr/local/bin/deploy.sh && chmod +x /usr/local/bin/deploy.sh; }
+        DAILY_CMD="curl -fsSL --max-time 30 https://raw.githubusercontent.com/zhaopengxin/V2Ray/main/deploy.sh -o /usr/local/bin/deploy.sh.new 2>/dev/null && [ -s /usr/local/bin/deploy.sh.new ] && bash -n /usr/local/bin/deploy.sh.new 2>/dev/null && mv /usr/local/bin/deploy.sh.new /usr/local/bin/deploy.sh && chmod +x /usr/local/bin/deploy.sh"
+        UPDATE_CMD="/usr/local/bin/deploy.sh update >> /var/log/singbox-update.log 2>&1"
+    fi
+
     cat > /etc/cron.d/singbox-auto-update <<EOF
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-# 每日 ${DAILY_HOUR}:${DAILY_MIN} (UTC) 拉取最新 deploy.sh
-${DAILY_MIN} ${DAILY_HOUR} * * *   root  curl -fsSL --max-time 30 https://raw.githubusercontent.com/zhaopengxin/V2Ray/main/deploy.sh -o /usr/local/bin/deploy.sh.new 2>/dev/null && [ -s /usr/local/bin/deploy.sh.new ] && bash -n /usr/local/bin/deploy.sh.new 2>/dev/null && mv /usr/local/bin/deploy.sh.new /usr/local/bin/deploy.sh && chmod +x /usr/local/bin/deploy.sh
+# 每日 ${DAILY_HOUR}:${DAILY_MIN} (UTC) 同步最新 deploy.sh
+${DAILY_MIN} ${DAILY_HOUR} * * *   root  ${DAILY_CMD}
 
 # 每${DOW_NAME[$UPDATE_DOW]} ${UPDATE_HOUR}:${UPDATE_MIN} (UTC) 升级 sing-box
-${UPDATE_MIN} ${UPDATE_HOUR} * * ${UPDATE_DOW}   root  /usr/local/bin/deploy.sh update >> /var/log/singbox-update.log 2>&1
+${UPDATE_MIN} ${UPDATE_HOUR} * * ${UPDATE_DOW}   root  ${UPDATE_CMD}
 EOF
-    log "  自动更新错峰: 每日 ${DAILY_HOUR}:$(printf '%02d' $DAILY_MIN) 拉脚本; 每${DOW_NAME[$UPDATE_DOW]} ${UPDATE_HOUR}:$(printf '%02d' $UPDATE_MIN) 升级 sing-box"
+    log "  错峰: 每日 ${DAILY_HOUR}:$(printf '%02d' $DAILY_MIN) 同步; 每${DOW_NAME[$UPDATE_DOW]} ${UPDATE_HOUR}:$(printf '%02d' $UPDATE_MIN) 升级 sing-box"
+    log "  自更新模式: ${MODE_DESC}"
 
     # 3) Ubuntu/Debian 系统安全补丁自动安装
     if command -v apt-get >/dev/null; then
