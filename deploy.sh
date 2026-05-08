@@ -292,12 +292,113 @@ cmd_update() {
     systemctl is-active --quiet sing-box && log "升级完成: $(sing-box version | head -1)" || err "升级后启动失败"
 }
 
+cmd_restart() {
+    need_root
+    systemctl restart sing-box && sleep 1
+    systemctl is-active --quiet sing-box && log "sing-box 已重启" || err "重启失败"
+}
+
+cmd_stop() {
+    need_root
+    systemctl stop sing-box && log "sing-box 已停止"
+}
+
+cmd_start() {
+    need_root
+    systemctl start sing-box && sleep 1
+    systemctl is-active --quiet sing-box && log "sing-box 已启动" || err "启动失败"
+}
+
+cmd_log() {
+    journalctl -u sing-box -n 50 --no-pager
+}
+
+cmd_uninstall() {
+    need_root
+    read -p "确认卸载 sing-box 并清空所有配置? (y/N) " -n 1 -r; echo
+    [[ ! $REPLY =~ ^[Yy]$ ]] && { log "已取消"; return; }
+    systemctl stop sing-box 2>/dev/null || true
+    systemctl disable sing-box 2>/dev/null || true
+    apt-get -y purge sing-box 2>/dev/null || true
+    rm -rf /etc/sing-box /var/lib/sing-box /var/log/singbox-update.log
+    rm -f /etc/cron.d/singbox-auto-update /usr/local/bin/deploy.sh
+    rm -f /root/sing-box-client.txt
+    log "sing-box 已完全卸载"
+}
+
+cmd_status() {
+    local active port
+    active=$(systemctl is-active sing-box 2>/dev/null)
+    port=$(grep -oP '"listen_port":\s*\K[0-9]+' $CFG 2>/dev/null || echo "?")
+    if [[ "$active" = active ]]; then
+        echo -e "\033[32m●\033[0m sing-box: \033[32m运行中\033[0m  (UDP/$port)"
+    else
+        echo -e "\033[31m●\033[0m sing-box: \033[31m未运行\033[0m"
+    fi
+}
+
+# ---------- 交互菜单 ----------
+menu() {
+    while true; do
+        clear
+        echo "============================================="
+        echo -e "    \033[1;36mSing-box + Hysteria2 管理菜单\033[0m"
+        echo "============================================="
+        echo
+        cmd_status
+        echo
+        echo "  ----- 部署 -----"
+        echo "   1.  安装 / 重新部署 (幂等)"
+        echo "   2.  升级 sing-box 到最新版"
+        echo "   3.  卸载 sing-box"
+        echo
+        echo "  ----- 服务 -----"
+        echo "   4.  启动"
+        echo "   5.  停止"
+        echo "   6.  重启"
+        echo
+        echo "  ----- 查看 -----"
+        echo "   7.  显示客户端导入链接"
+        echo "   8.  健康检查 (doctor)"
+        echo "   9.  查看日志 (最近 50 条)"
+        echo
+        echo "   0.  退出"
+        echo
+        read -p " 请选择 [0-9]: " ans
+        echo
+        case "$ans" in
+            1) cmd_install ;;
+            2) cmd_update ;;
+            3) cmd_uninstall ;;
+            4) cmd_start ;;
+            5) cmd_stop ;;
+            6) cmd_restart ;;
+            7) cmd_info ;;
+            8) cmd_doctor ;;
+            9) cmd_log ;;
+            0) exit 0 ;;
+            *) warn "无效选项" ;;
+        esac
+        echo
+        read -p "按回车返回菜单..." _
+    done
+}
+
 # ---------- 入口 ----------
-action="${1:-install}"
+action="${1:-menu}"
 case "$action" in
-    install|"") cmd_install ;;
-    doctor)     cmd_doctor ;;
-    info)       cmd_info ;;
-    update)     cmd_update ;;
-    *) echo "用法: $0 [install|doctor|info|update]"; exit 1 ;;
+    menu|"")              menu ;;
+    install)              cmd_install ;;
+    doctor)               cmd_doctor ;;
+    info)                 cmd_info ;;
+    update)               cmd_update ;;
+    start|stop|restart)   cmd_${action} ;;
+    log|logs)             cmd_log ;;
+    uninstall)            cmd_uninstall ;;
+    status)               cmd_status ;;
+    *)
+        echo "用法: $0 [menu|install|doctor|info|update|start|stop|restart|log|uninstall|status]"
+        echo "  无参数 = 进入交互菜单"
+        exit 1
+        ;;
 esac
