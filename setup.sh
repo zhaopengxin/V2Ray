@@ -1,4 +1,19 @@
 #!/bin/bash
+# ============================================================================
+# ⚠️  DEPRECATED ⚠️   旧版 V2ray + Nginx + acme.sh 部署脚本
+#
+# 此脚本已被 deploy.sh 取代，新机器请用 deploy.sh（sing-box + Hysteria2）。
+#
+# 弃用原因:
+#   - v2ray 4.33 (2020) 性能差、协议老
+#   - nginx + acme.sh 续签时遇 OOM 会把 nginx 搞挂，整夜不可用
+#   - 多组件维护复杂，故障面大
+#
+# 保留原因: 供历史参考 / 万一需要回滚到老协议 (VLESS+WS+TLS / Trojan / VMess)
+#
+# 新方案见 deploy.sh, 详情见 README.md
+# ============================================================================
+
 # v2ray一键安装脚本
 # Author: 梯子博客<https://tizi.blog/>
 
@@ -1950,6 +1965,24 @@ menu() {
 }
 
 checkSystem
+
+# ============================================================================
+# 弃用警告 (允许通过 SETUP_FORCE=1 跳过)
+# ============================================================================
+if [[ -z "${SETUP_FORCE:-}" ]]; then
+    echo
+    echo -e "${YELLOW}⚠️  警告: setup.sh 已弃用${PLAIN}"
+    echo
+    echo "  新机器请使用 deploy.sh (sing-box + Hysteria2):"
+    echo "      sudo bash deploy.sh"
+    echo
+    echo "  如确需使用旧版 v2ray+nginx 部署，设置 SETUP_FORCE=1 强制运行:"
+    echo "      sudo SETUP_FORCE=1 bash setup.sh"
+    echo
+    read -p "  仍要继续吗? (y/N) " -n 1 -r CONFIRM
+    echo
+    [[ ! $CONFIRM =~ ^[Yy]$ ]] && exit 0
+fi
 
 action=$1
 [[ -z $1 ]] && action=menu
