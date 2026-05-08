@@ -167,16 +167,27 @@ setup_auto_update() {
         || cp "$(realpath "$0")" /usr/local/bin/deploy.sh && chmod +x /usr/local/bin/deploy.sh
 
     # 2) cron: 每周升级 sing-box, 每日自更新 deploy.sh
-    cat > /etc/cron.d/singbox-auto-update <<'EOF'
+    # 错峰: 用主 IP 的 sha256 算 (周几 + 几点 + 几分), 避免 4+ 台机器同时拉 GitHub / 同时升级
+    # 注意: bash 数字带前导 0 默认按八进制解析, 用 10# 强制十进制
+    local IP_HASH=$(hostname -I | awk '{print $1}' | sha256sum | tr -dc '0-9')
+    local UPDATE_DOW=$(( 10#${IP_HASH:0:4} % 7 ))         # 0=周日
+    local UPDATE_HOUR=$(( 5 + 10#${IP_HASH:4:4} % 2 ))    # 5 或 6 点 (UTC)
+    local UPDATE_MIN=$(( 10#${IP_HASH:8:4} % 60 ))
+    local DAILY_HOUR=$(( 3 + 10#${IP_HASH:12:4} % 2 ))    # 3 或 4 点
+    local DAILY_MIN=$(( 10#${IP_HASH:16:4} % 60 ))
+    local DOW_NAME=(周日 周一 周二 周三 周四 周五 周六)
+
+    cat > /etc/cron.d/singbox-auto-update <<EOF
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-# 每天 03:17 拉取最新 deploy.sh
-17 3 * * *   root  curl -fsSL --max-time 30 https://raw.githubusercontent.com/zhaopengxin/V2Ray/main/deploy.sh -o /usr/local/bin/deploy.sh.new 2>/dev/null && [ -s /usr/local/bin/deploy.sh.new ] && mv /usr/local/bin/deploy.sh.new /usr/local/bin/deploy.sh && chmod +x /usr/local/bin/deploy.sh
+# 每日 ${DAILY_HOUR}:${DAILY_MIN} (UTC) 拉取最新 deploy.sh
+${DAILY_MIN} ${DAILY_HOUR} * * *   root  curl -fsSL --max-time 30 https://raw.githubusercontent.com/zhaopengxin/V2Ray/main/deploy.sh -o /usr/local/bin/deploy.sh.new 2>/dev/null && [ -s /usr/local/bin/deploy.sh.new ] && bash -n /usr/local/bin/deploy.sh.new 2>/dev/null && mv /usr/local/bin/deploy.sh.new /usr/local/bin/deploy.sh && chmod +x /usr/local/bin/deploy.sh
 
-# 每周日 05:17 升级 sing-box
-17 5 * * 0   root  /usr/local/bin/deploy.sh update >> /var/log/singbox-update.log 2>&1
+# 每${DOW_NAME[$UPDATE_DOW]} ${UPDATE_HOUR}:${UPDATE_MIN} (UTC) 升级 sing-box
+${UPDATE_MIN} ${UPDATE_HOUR} * * ${UPDATE_DOW}   root  /usr/local/bin/deploy.sh update >> /var/log/singbox-update.log 2>&1
 EOF
+    log "  自动更新错峰: 每日 ${DAILY_HOUR}:$(printf '%02d' $DAILY_MIN) 拉脚本; 每${DOW_NAME[$UPDATE_DOW]} ${UPDATE_HOUR}:$(printf '%02d' $UPDATE_MIN) 升级 sing-box"
 
     # 3) Ubuntu/Debian 系统安全补丁自动安装
     if command -v apt-get >/dev/null; then
