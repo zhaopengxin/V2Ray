@@ -180,14 +180,19 @@ EOF
 
     # 3) Ubuntu/Debian 系统安全补丁自动安装
     if command -v apt-get >/dev/null; then
-        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq unattended-upgrades apt-listchanges >/dev/null 2>&1 || true
-        cat > /etc/apt/apt.conf.d/20auto-upgrades <<EOF
+        if DEBIAN_FRONTEND=noninteractive apt-get install -y -qq unattended-upgrades apt-listchanges >/dev/null 2>&1; then
+            cat > /etc/apt/apt.conf.d/20auto-upgrades <<EOF
 APT::Periodic::Update-Package-Lists "1";
 APT::Periodic::Unattended-Upgrade "1";
 APT::Periodic::AutocleanInterval "7";
 EOF
-        # 默认只装 security 通道，不动其他
-        systemctl enable unattended-upgrades >/dev/null 2>&1 || true
+            systemctl enable unattended-upgrades >/dev/null 2>&1 && \
+                log "unattended-upgrades 已配置 (每日自动装系统安全补丁)" || \
+                warn "unattended-upgrades enable 失败"
+        else
+            warn "unattended-upgrades 安装失败 (可能 apt 被占用 / 网络问题)，跳过系统自动补丁"
+            warn "  可稍后手动执行: sudo apt install unattended-upgrades"
+        fi
     fi
 }
 
