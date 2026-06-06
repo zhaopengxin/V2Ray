@@ -28,6 +28,8 @@ sudo bash deploy.sh
 hysteria2://<password>@<ip>:443/?sni=www.bing.com&insecure=1#hy2-<ip>
 ```
 
+链接会保存到 `/root/sing-box-client.txt`；如果从 git clone 的项目目录执行，也会复制一份到 `deploy.sh` 同目录下的 `sing-box-client.txt`。
+
 粘贴到 Clash Verge Rev / Shadowrocket / V2rayN 即可。
 
 ### 自定义参数

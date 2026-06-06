@@ -21,6 +21,17 @@ CFG=/etc/sing-box/config.json
 CERT_DIR=/etc/sing-box/cert
 CLIENT_FILE=/root/sing-box-client.txt
 
+# 在脚本启动时固定自身路径；后续函数会 cd 到 /tmp 等目录，不能再依赖相对 $0。
+START_CWD="$(pwd -P)"
+SCRIPT_SOURCE="${BASH_SOURCE[0]:-$0}"
+SCRIPT_PATH=""
+if [[ "$SCRIPT_SOURCE" == */* ]]; then
+    SCRIPT_PATH="$(realpath "$SCRIPT_SOURCE" 2>/dev/null || true)"
+elif [[ -f "$START_CWD/$SCRIPT_SOURCE" ]]; then
+    SCRIPT_PATH="$(realpath "$START_CWD/$SCRIPT_SOURCE" 2>/dev/null || true)"
+fi
+SCRIPT_DIR="${SCRIPT_PATH:+$(dirname "$SCRIPT_PATH")}"
+
 # ---------- 工具函数 ----------
 log()  { echo -e "\033[1;32m[+]\033[0m $*"; }
 warn() { echo -e "\033[1;33m[!]\033[0m $*"; }
@@ -175,23 +186,24 @@ setup_auto_update() {
     # 检测当前脚本是不是在 git 仓库里
     # - 是 → cron 用 git pull 更新, 保留你 git clone 的工作目录
     # - 否 → cron 用 curl 拉单文件到 /usr/local/bin/, 适合"一行 curl|bash"场��
-    local SCRIPT_PATH=$(realpath "$0")
-    local SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
     local DAILY_CMD UPDATE_CMD MODE_DESC
 
-    if cd "$SCRIPT_DIR" 2>/dev/null && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-        local REPO_DIR=$(git rev-parse --show-toplevel)
+    if [[ -n "$SCRIPT_DIR" ]] && git -C "$SCRIPT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        local REPO_DIR=$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)
         local SCRIPT_REL=$(realpath --relative-to="$REPO_DIR" "$SCRIPT_PATH")
         MODE_DESC="git 模式 ($REPO_DIR)"
         DAILY_CMD="cd $REPO_DIR && git pull --quiet --ff-only 2>/dev/null && bash -n $SCRIPT_REL 2>/dev/null || true"
         UPDATE_CMD="cd $REPO_DIR && bash $SCRIPT_REL update >> /var/log/singbox-update.log 2>&1"
-    else
+    elif [[ -n "$SCRIPT_PATH" ]]; then
         MODE_DESC="单文件模式 (/usr/local/bin/deploy.sh)"
         # 把当前脚本固定到 /usr/local/bin/
         install -m 755 "$SCRIPT_PATH" /usr/local/bin/deploy.sh 2>/dev/null \
             || { cp "$SCRIPT_PATH" /usr/local/bin/deploy.sh && chmod +x /usr/local/bin/deploy.sh; }
         DAILY_CMD="curl -fsSL --max-time 30 https://raw.githubusercontent.com/zhaopengxin/V2Ray/main/deploy.sh -o /usr/local/bin/deploy.sh.new 2>/dev/null && [ -s /usr/local/bin/deploy.sh.new ] && bash -n /usr/local/bin/deploy.sh.new 2>/dev/null && mv /usr/local/bin/deploy.sh.new /usr/local/bin/deploy.sh && chmod +x /usr/local/bin/deploy.sh"
         UPDATE_CMD="/usr/local/bin/deploy.sh update >> /var/log/singbox-update.log 2>&1"
+    else
+        warn "无法定位 deploy.sh 路径，跳过 deploy.sh 自更新"
+        return
     fi
 
     cat > /etc/cron.d/singbox-auto-update <<EOF
@@ -247,6 +259,17 @@ EOF
     echo "======================================================"
     echo
     echo "已保存到 $CLIENT_FILE"
+
+    # 顺手复制一份到脚本所在目录, 方便 ssh 用户直接 cat 不用 sudo
+    # 跳过 /root 和 /usr/local/bin: 前者就是 $CLIENT_FILE 的家(重复), 后者是 cron 固定路径(无意义)
+    if [[ -n "$SCRIPT_DIR" ]] && [[ "$SCRIPT_DIR" != /root ]] && [[ "$SCRIPT_DIR" != /usr/local/bin ]]; then
+        local dst="$SCRIPT_DIR/sing-box-client.txt"
+        if cp "$CLIENT_FILE" "$dst" 2>/dev/null; then
+            [[ -n "${SUDO_USER:-}" && "$SUDO_USER" != root ]] && \
+                chown "$SUDO_USER:$SUDO_USER" "$dst" 2>/dev/null
+            echo "         $dst  (普通用户无需 sudo 可读)"
+        fi
+    fi
     echo
     warn "请确保云厂商防火墙/NSG 放行 UDP/${PORT} 入站"
     echo "  Azure CLI:  az network nsg rule create --resource-group <RG> --nsg-name <NSG> \\"
