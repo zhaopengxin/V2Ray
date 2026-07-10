@@ -1,0 +1,20 @@
+#cloud-config
+package_update: true
+package_upgrade: false
+packages:
+  - git
+  - curl
+
+write_files:
+  - path: /root/bootstrap.log
+    content: "boot started\n"
+    permissions: '0644'
+
+runcmd:
+  - echo "[$(date)] cloning V2Ray repo" >> /root/bootstrap.log
+  - cd /root && git clone https://github.com/zhaopengxin/V2Ray.git >> /root/bootstrap.log 2>&1
+  - echo "[$(date)] running deploy.sh install" >> /root/bootstrap.log
+  - cd /root/V2Ray && bash deploy.sh install >> /root/bootstrap.log 2>&1
+  - echo "[$(date)] deploy done" >> /root/bootstrap.log
+  - cp /root/sing-box-client.txt /home/zhaopengxin/sing-box-client.txt 2>/dev/null || true
+  - chown zhaopengxin:zhaopengxin /home/zhaopengxin/sing-box-client.txt 2>/dev/null || true
