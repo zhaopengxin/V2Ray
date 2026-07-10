@@ -13,7 +13,21 @@ Sing-box + Hysteria2 一键部署脚本，单进程、零证书、UDP/443 直连
 - 不再需要域名 / 证书续签
 - 单连吞吐 ~500-1000 Mbps（QUIC + BBR）
 
-## 使用
+---
+
+## 仓库文件说明
+
+| 文件 | 用途 |
+|---|---|
+| `deploy.sh` | 主脚本，全新部署 / 管理服务 |
+| `cloud-init-vpn.yaml` | Azure 新建 VM 时传入 `--custom-data`，开机自动部署，无需登录 |
+| `sr_top500_banlist.conf` | 可选黑名单，供 Clash 等客户端导入 |
+| `clash-config.yaml` | Clash 客户端配置（含密码，已加入 .gitignore，不提交） |
+| `setup.sh` | 旧版 v2ray + nginx 脚本（已弃用，保留备查） |
+
+---
+
+## 方式一：手动部署（单台机器）
 
 ### 全新机器一键部署
 
@@ -46,6 +60,46 @@ sudo bash deploy.sh info     # 显示客户端链接
 sudo bash deploy.sh update   # 升级 sing-box 到最新版
 ```
 
+---
+
+## 方式二：Azure 新建 VM 自动部署（cloud-init）
+
+`cloud-init-vpn.yaml` 会在 VM 首次开机时自动 `git clone` 并执行 `deploy.sh install`，全程无人值守。
+
+### 新建 VM 命令
+
+```bash
+az vm create \
+  --resource-group vpn \
+  --name vpn-xxx \
+  --location japaneast \
+  --image Ubuntu2404 \
+  --size Standard_B2s_v2 \
+  --admin-username zhaopengxin \
+  --ssh-key-values ~/.ssh/id_ed25519.pub \
+  --custom-data D:/ai/V2Ray/cloud-init-vpn.yaml \
+  --public-ip-sku Standard \
+  --nsg-rule SSH
+```
+
+### 开放 UDP/443
+
+```bash
+az network nsg rule create -g vpn --nsg-name vpn-xxxNSG \
+  --name Allow-UDP-443 --priority 1010 --protocol Udp \
+  --destination-port-ranges 443 --access Allow --direction Inbound
+```
+
+### 查看部署日志
+
+```bash
+ssh zhaopengxin@<ip> "tail -f /root/bootstrap.log"
+```
+
+部署完成后客户端链接存放在 `/home/zhaopengxin/sing-box-client.txt`。
+
+---
+
 ## 脚本做了什么
 
 | 步骤 | 说明 |
@@ -59,32 +113,30 @@ sudo bash deploy.sh update   # 升级 sing-box 到最新版
 | NOPASSWD sudo | 当前 SSH 用户免密 sudo |
 | systemd 自启 | enable + restart 自动恢复 |
 
+---
+
 ## 客户端
 
-| 平台 | 推荐 GUI |
+| 平台 | 推荐客户端 |
 |---|---|
-| Windows | **Clash Verge Rev** （开源） |
+| Windows | **Clash Verge Rev**（开源） |
 | iOS | Shadowrocket（付费） |
 | Android | sing-box 官方 / Karing |
-| Mac | Clash Verge Rev |
+| macOS | Clash Verge Rev |
 
-参考 Clash YAML 配置见 `clash-config.yaml`：
-- 4 节点 + URL-Test 自动选最快
+`clash-config.yaml` 参考配置（本地文件，不在仓库中）：
+- jp/us 双节点 + URL-Test 自动选最快
+- OpenAI/Anthropic 流量强制走美国节点
 - GeoSite-CN / GeoIP-CN 双判定，国内直连
-- 自动广告拦截
 - 节点 IP 直连（防环路）
+
+---
 
 ## 防火墙提醒
 
-部署后**云厂商安全组必须放行 UDP/$PORT 入站**。Azure CLI 示例：
+部署后**云厂商安全组必须放行 UDP/$PORT 入站**，否则客户端无法连接。
 
-```bash
-az network nsg rule create \
-  --resource-group <RG> --nsg-name <NSG> \
-  --name Allow-UDP-443 --priority 1011 \
-  --protocol Udp --destination-port-ranges 443 \
-  --access Allow --direction Inbound
-```
+---
 
 ## 历史
 
