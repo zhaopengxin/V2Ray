@@ -173,14 +173,20 @@ setup_nopasswd() {
 setup_auto_update() {
     log "配置自动更新 (sing-box / 系统补丁 / deploy.sh)..."
 
-    # 错峰参数: 用主 IP 的 sha256 算 (周几 + 几点 + 几分), 避免多台机器同时拉 GitHub / 同时升级
-    # 注意: bash 数字带前导 0 默认按八进制解析, 用 10# 强制十进制
-    local IP_HASH=$(hostname -I | awk '{print $1}' | sha256sum | tr -dc '0-9')
-    local UPDATE_DOW=$(( 10#${IP_HASH:0:4} % 7 ))         # 0=周日
-    local UPDATE_HOUR=$(( 5 + 10#${IP_HASH:4:4} % 2 ))    # 5 或 6 点 (UTC)
-    local UPDATE_MIN=$(( 10#${IP_HASH:8:4} % 60 ))
-    local DAILY_HOUR=$(( 3 + 10#${IP_HASH:12:4} % 2 ))    # 3 或 4 点
-    local DAILY_MIN=$(( 10#${IP_HASH:16:4} % 60 ))
+    # 不同虚拟网络可有相同内网 IP；用主机名和 machine-id 分散维护时间。
+    # 用 16# 显式按十六进制解析固定长度的哈希片段。
+    local NODE_NAME MACHINE_ID NODE_HASH
+    if ! NODE_NAME=$(hostname) || ! MACHINE_ID=$(cat /etc/machine-id) \
+        || [[ -z "$NODE_NAME" || -z "$MACHINE_ID" ]]; then
+        err "无法读取主机名或 /etc/machine-id，自动更新配置失败"
+        return 1
+    fi
+    NODE_HASH=$(printf '%s\n%s\n' "$NODE_NAME" "$MACHINE_ID" | sha256sum)
+    local UPDATE_DOW=$(( 16#${NODE_HASH:0:4} % 7 ))         # 0=周日
+    local UPDATE_HOUR=$(( 5 + 16#${NODE_HASH:4:4} % 2 ))    # 5 或 6 点 (UTC)
+    local UPDATE_MIN=$(( 16#${NODE_HASH:8:4} % 60 ))
+    local DAILY_HOUR=$(( 3 + 16#${NODE_HASH:12:4} % 2 ))    # 3 或 4 点
+    local DAILY_MIN=$(( 16#${NODE_HASH:16:4} % 60 ))
     local DOW_NAME=(周日 周一 周二 周三 周四 周五 周六)
 
     # 检测当前脚本是不是在 git 仓库里
