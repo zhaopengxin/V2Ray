@@ -112,6 +112,17 @@ ssh zhaopengxin@<ip> "tail -f /root/bootstrap.log"
 | setcap | 允许非 root 绑定 :443 |
 | NOPASSWD sudo | 当前 SSH 用户免密 sudo |
 | systemd 自启 | enable + restart 自动恢复 |
+| 自动更新 | 每日同步脚本、每周检查 sing-box 新版本，并安装系统安全补丁 |
+
+---
+
+## 自动更新与错峰
+
+安装时按主机名和 `/etc/machine-id` 的 SHA-256 哈希生成更新计划，写入 `/etc/cron.d/singbox-auto-update`，时间为 UTC。不使用内网 IP，因为不同虚拟网络中的节点可能使用相同的内网 IP。哈希分配用于分散时间，主备节点仍应核对计划，明确错开升级窗口。
+
+已有节点的 cron 不会随脚本日更自动重新生成；调整计划时直接编辑该 cron 文件，cron 会自动重新读取，无需重启 sing-box，也不要为此重新执行 `install`。当前日本节点为周一 13:05、美国节点为周三 13:35，均为北京时间。
+
+每日同步脚本不会重启 VPN；每周仅在 sing-box 有新版本时升级并重启。Ubuntu 自动安全补丁由系统自己的计划任务控制，不受上述 sing-box 升级时间控制。
 
 ---
 
